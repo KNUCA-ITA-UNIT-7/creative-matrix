@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8">
+<title>Creative Matrix — Live</title>
+<style>
+  /* ====================== НАЛАШТУВАННЯ ======================
+     1) FORM_URL  — посилання на Google Форму (кнопка "Надіслати" -> іконка ланцюжка)
+     2) CSV_URL   — посилання на опубліковану як CSV Google Таблицю
+        (File -> Share -> Publish to web -> обрати аркуш -> формат CSV -> Publish)
+     Форма повинна мати рівно 3 поля, у цьому порядку:
+        Ім'я | Професія | Instagram
+     (порядок колонок у Таблиці відповідей має бути: Timestamp, Ім'я, Професія, Instagram)
+     ============================================================ */
+  * { box-sizing: border-box; }
+  body{font-family:Arial,sans-serif;background:#fff;margin:0;padding:30px}
+  h2{margin:0 0 6px 0;letter-spacing:1px}
+  .sub{color:#666;margin:0 0 24px 0}
+  .grid{
+    display:grid;
+    grid-template-columns:repeat(auto-fill,minmax(140px,1fr));
+    gap:0;
+    border-top:1px solid #000;
+    border-left:1px solid #000;
+  }
+  .tile{
+    perspective:800px;
+    aspect-ratio:1/1;
+    cursor:pointer;
+    border-right:1px solid #000;
+    border-bottom:1px solid #000;
+  }
+  .inner{position:relative;width:100%;height:100%;transform-style:preserve-3d;transition:transform .6s}
+  .face{
+    position:absolute;inset:0;
+    background:#fff;
+    display:flex;align-items:center;justify-content:center;flex-direction:column;
+    gap:10px;
+    backface-visibility:hidden;font-weight:bold;
+    text-transform:uppercase;letter-spacing:.5px;
+    text-align:center;padding:8px;
+  }
+  .link{transform:rotateY(180deg)}
+  .small{font-size:13px;font-weight:normal;text-transform:none;color:#444}
+
+  /* тайл "+" */
+  .plus-tile .inner{
+    display:flex;align-items:center;justify-content:center;
+    background:#fff;
+  }
+  .plus-tile .plus-icon{
+    font-size:48px;font-weight:normal;color:#000;line-height:1;
+  }
+  .plus-tile:hover .plus-icon{color:#555}
+
+  .status{font-size:12px;color:#999;margin-top:16px}
+</style></head>
+<body>
+<h2>CREATIVE MATRIX</h2>
+<p class="sub">Клікни на тайл, щоб перемкнути Професія ↔ Instagram. Тайл "+" відкриває форму для нового учасника.</p>
+<div class="grid" id="grid"></div>
+<p class="status" id="status">Завантаження даних…</p>
+
+<script>
+// ==================== ЗАПОВНИ ЦІ ДВА РЯДКИ ====================
+const FORM_URL = "https://forms.gle/EqfMzPtrsoJ4DdMD9";
+const CSV_URL  = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRlMf5Rh_3UQ6QdS0JR8Ok3BSUHmB2xq919W7lDTzj998Uc6y0CR_UNjt8Emf39ljgv-M707MRyxr1w/pub?gid=550239994&single=true&output=csv";
+// ================================================================
+
+const POLL_INTERVAL_MS = 15000; // як часто перевіряти нові відповіді (15 сек)
+
+const grid = document.getElementById("grid");
+const statusEl = document.getElementById("status");
+let knownNames = new Set();
+
+function makePlusTile(){
+  const t = document.createElement("div");
+  t.className = "tile plus-tile";
+  t.innerHTML = `<div class="inner"><div class="plus-icon">+</div></div>`;
+  t.onclick = () => window.open(FORM_URL, "_blank");
+  return t;
+}
+
+function makePersonTile(name, profession, insta){
+  const t = document.createElement("div");
+  t.className = "tile";
+  t.innerHTML = `<div class="inner">
+    <div class="face prof"><div>${profession}</div><div class="small">${name}</div></div>
+    <div class="face link"><div>Instagram</div><div class="small">${insta}</div></div>
+  </div>`;
+  let state = 0;
+  t.onclick = () => {
+    state = (state + 1) % 2;
+    t.querySelector(".inner").style.transform = `rotateY(${state*180}deg)`;
+  };
+  return t;
+}
+
+// простий CSV-парсер (без лапок/ком у значеннях; для складніших випадків додай PapaParse)
+function parseCSV(text){
+  const rows = text.trim().split("\n").map(r => r.split(",").map(c => c.trim().replace(/^"|"$/g,"")));
+  const header = rows.shift();
+  return rows.map(r => {
+    const obj = {};
+    header.forEach((h,i) => obj[h] = r[i] || "");
+    return obj;
+  });
+}
+
+function render(people){
+  grid.innerHTML = "";
+  grid.appendChild(makePlusTile());
+  people.forEach(p => {
+    if(!p.name) return;
+    grid.appendChild(makePersonTile(p.name, p.profession, p.insta));
+  });
+}
+
+// одразу показуємо тайл "+", ще до першого fetch — щоб він ніколи не зникав
+render([]);
+
+async function refresh(){
+  if(CSV_URL.includes("ВАШ_ID")){
+    statusEl.textContent = "⚠ Встав свої FORM_URL і CSV_URL у коді, щоб дані підвантажувались автоматично.";
+    render([]); // покаже лише тайл "+"
+    return;
+  }
+  try{
+    const res = await fetch(CSV_URL + "&_=" + Date.now()); // cache-bust
+    const text = await res.text();
+    const rows = parseCSV(text);
+    // очікувані колонки з Google Forms: Timestamp, Ім'я, Професія, Instagram
+    const people = rows.map(r => ({
+      name: r["Ваше імя"] || r["Ваше ім'я"] || r["Ім'я"] || r["Name"] || "",
+      profession: r["Професія"] || r["Ваша професія"] || r["Profession"] || "",
+      insta: r["Instagram"] || r["Ваш Instagram"] || ""
+    }));
+    render(people);
+    statusEl.textContent = `Оновлено: ${new Date().toLocaleTimeString()} · учасників: ${people.length}`;
+  } catch(err){
+    render([]); // тайл "+" все одно показуємо, навіть якщо дані не завантажились
+    statusEl.textContent = "⚠ Помилка завантаження даних (перевір CSV_URL): " + err.message;
+  }
+}
+
+refresh();
+setInterval(refresh, POLL_INTERVAL_MS);
+</script>
+</body></html>
